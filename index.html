@@ -1,0 +1,2073 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mô Phỏng 3D VEX GO — Hệ Thống Sa Bàn Động</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Three.js r128 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <!-- Google Fonts Inter -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      overflow: hidden;
+      user-select: none;
+      background-color: #0f172a;
+      color: #f8fafc;
+    }
+
+    /* Thanh cuộn tinh gọn cho bảng Admin */
+    ::-webkit-scrollbar {
+      width: 5px;
+      height: 5px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, 0.25);
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(148, 163, 184, 0.45);
+    }
+
+    #canvas-container canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      outline: none;
+    }
+
+    /* Hiệu ứng bề mặt kính mờ tinh tế */
+    .glass-surface {
+      background: rgba(15, 23, 42, 0.84);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .glass-panel {
+      background: rgba(15, 23, 42, 0.94);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+    }
+
+    /* Hiệu ứng chuyển tiếp mượt mà */
+    .smooth-transition {
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+  </style>
+</head>
+<body class="relative w-screen h-screen overflow-hidden">
+
+  <!-- 1. KHÔNG GIAN 3D TOÀN MÀN HÌNH -->
+  <div id="canvas-container" class="w-full h-full cursor-grab active:cursor-grabbing"></div>
+
+  <!-- Nhãn tọa độ nổi khi di chuột trên bàn ở chế độ Admin -->
+  <div id="hover-coord-pill" class="hidden fixed pointer-events-none z-30 px-2.5 py-1 rounded-md bg-slate-900/95 border border-slate-700 text-[11px] font-medium text-slate-200 shadow-lg transform -translate-x-1/2 -translate-y-full -mt-2">
+    Hàng 1, Cột 1
+  </div>
+
+  <!-- 2. THANH ĐIỀU HƯỚNG PHÍA TRÊN (CHUYỂN CHẾ ĐỘ & GÓC NHÌN) -->
+  <header class="fixed top-4 left-4 right-4 z-20 flex flex-wrap items-center justify-between gap-3 pointer-events-none">
+    
+    <!-- Chuyển đổi chế độ Học viên / Admin -->
+    <div class="glass-surface p-1 rounded-xl shadow-xl flex items-center gap-1 pointer-events-auto">
+      <button id="mode-student-btn" onclick="switchAppMode('student')" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold smooth-transition bg-indigo-600 text-white shadow-sm">
+        Chế độ Học viên
+      </button>
+      <button id="mode-admin-btn" onclick="switchAppMode('admin')" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold smooth-transition text-slate-300 hover:text-white hover:bg-slate-800/60">
+        Cấu hình Sa bàn
+      </button>
+    </div>
+
+    <!-- Thông báo ngữ cảnh khi đang chọn ô trong Admin -->
+    <div id="admin-pick-banner" class="hidden glass-surface px-4 py-1.5 rounded-xl border-indigo-500/40 text-xs font-medium text-indigo-200 shadow-xl pointer-events-auto flex items-center gap-3">
+      <span class="w-2 h-2 rounded-full bg-indigo-400 animate-pulse"></span>
+      <span id="admin-pick-text">Nhấp trực tiếp vào một ô vuông trên sa bàn 3D để chọn vị trí</span>
+    </div>
+
+    <!-- Cụm nút Góc nhìn Camera & Hiển thị đường dẫn -->
+    <div class="glass-surface p-1 rounded-xl shadow-xl flex items-center gap-1 pointer-events-auto">
+      <button id="cam-perspective" onclick="setCameraPreset('perspective')" class="px-3 py-1.5 rounded-lg text-xs font-medium smooth-transition bg-slate-800 text-white">
+        Góc nhìn 3D
+      </button>
+      <button id="cam-top" onclick="setCameraPreset('top')" class="px-3 py-1.5 rounded-lg text-xs font-medium smooth-transition text-slate-400 hover:text-slate-200">
+        Mặt phẳng
+      </button>
+      <button id="cam-follow" onclick="setCameraPreset('follow')" class="px-3 py-1.5 rounded-lg text-xs font-medium smooth-transition text-slate-400 hover:text-slate-200">
+        Theo Robot
+      </button>
+      <div class="w-[1px] h-4 bg-slate-700/80 mx-1"></div>
+      <button id="btn-trail" onclick="toggleTrail()" class="px-3 py-1.5 rounded-lg text-xs font-medium smooth-transition text-emerald-300 bg-emerald-500/10 border border-emerald-500/20">
+        Lộ trình: Hiện
+      </button>
+    </div>
+  </header>
+
+  <!-- 3. BẢNG CẤU HÌNH SA BÀN DÀNH CHO ADMIN (SLIDE-OVER DRAWER BÊN TRÁI) -->
+  <aside id="admin-drawer" class="fixed top-20 bottom-24 left-4 w-[380px] max-w-[calc(100vw-2rem)] z-20 glass-panel border border-slate-800/90 rounded-2xl shadow-2xl flex flex-col overflow-hidden smooth-transition transform -translate-x-[430px] opacity-0 pointer-events-none">
+    
+    <!-- Header của Drawer -->
+    <div class="px-5 pt-4 pb-3 border-b border-slate-800/80 flex items-center justify-between">
+      <div>
+        <h2 class="text-sm font-semibold text-white tracking-tight">Trình Thiết Kế Sa Bàn</h2>
+        <p class="text-[11px] text-slate-400 mt-0.5">Nhấp vào ô trên sa bàn 3D để định nghĩa điểm chạm</p>
+      </div>
+      <div class="flex items-center gap-1.5">
+        <button onclick="loadDefault4PointScenario()" class="px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-[11px] font-medium text-slate-200 border border-slate-700 smooth-transition" title="Nạp lại đề bài 4 điểm mặc định">
+          Đề mẫu 4 điểm
+        </button>
+        <button onclick="clearArenaScenario()" class="px-2.5 py-1 rounded-md bg-slate-800/60 hover:bg-rose-950/60 hover:text-rose-300 hover:border-rose-800/50 text-[11px] font-medium text-slate-400 border border-slate-800 smooth-transition">
+          Làm trống
+        </button>
+      </div>
+    </div>
+
+    <!-- Thanh chuyển Tab trong Admin -->
+    <div class="px-5 pt-3 pb-2 bg-slate-950/40 border-b border-slate-800/70">
+      <div class="grid grid-cols-3 gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800">
+        <button id="tab-btn-zones" onclick="switchAdminTab('zones')" class="py-1.5 rounded-lg text-xs font-medium smooth-transition bg-slate-800 text-white shadow-sm">
+          1. Mặt bằng ô
+        </button>
+        <button id="tab-btn-waypoints" onclick="switchAdminTab('waypoints')" class="py-1.5 rounded-lg text-xs font-medium smooth-transition text-slate-400 hover:text-slate-200">
+          2. Điểm chạm
+        </button>
+        <button id="tab-btn-settings" onclick="switchAdminTab('settings')" class="py-1.5 rounded-lg text-xs font-medium smooth-transition text-slate-400 hover:text-slate-200">
+          3. Cài đặt & Mã
+        </button>
+      </div>
+    </div>
+
+    <!-- NỘI DUNG TAB 1: THIẾT LẬP MẶT BẰNG Ô & VẬT PHẨM -->
+    <div id="admin-tab-zones" class="flex-1 overflow-y-auto p-5 space-y-4">
+      
+      <!-- Khung hiển thị ô đang được chọn trên sa bàn -->
+      <div class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-3">
+        <div class="flex items-center justify-between">
+          <span class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Ô đang chọn trên bàn</span>
+          <span id="selected-cell-badge" class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+            Hàng 5, Cột 1
+          </span>
+        </div>
+
+        <!-- Phân loại vai trò của ô -->
+        <div class="space-y-1.5">
+          <label class="text-xs font-medium text-slate-300 block">Chức năng của ô</label>
+          <div class="grid grid-cols-2 gap-1.5">
+            <button type="button" onclick="setCellRole('empty')" id="role-btn-empty" class="py-2 px-2.5 rounded-lg text-xs font-medium border text-left smooth-transition">
+              Ô trống
+            </button>
+            <button type="button" onclick="setCellRole('start')" id="role-btn-start" class="py-2 px-2.5 rounded-lg text-xs font-medium border text-left smooth-transition">
+              Điểm Xuất phát
+            </button>
+            <button type="button" onclick="setCellRole('station')" id="role-btn-station" class="py-2 px-2.5 rounded-lg text-xs font-medium border text-left smooth-transition">
+              Vị trí lấy vật phẩm
+            </button>
+            <button type="button" onclick="setCellRole('warehouse')" id="role-btn-warehouse" class="py-2 px-2.5 rounded-lg text-xs font-medium border text-left smooth-transition">
+              Kho chứa vật phẩm
+            </button>
+          </div>
+        </div>
+
+        <!-- Nhãn hiển thị trên mặt sàn -->
+        <div id="cell-config-details" class="space-y-3 pt-2 border-t border-slate-800/80">
+          <div>
+            <label class="text-xs font-medium text-slate-300 block mb-1">Tên hiển thị trên ô</label>
+            <input id="cell-label-input" type="text" maxlength="16" oninput="updateSelectedCellProps()" placeholder="Ví dụ: VỊ TRÍ 1, KHO 1..." class="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-indigo-500" />
+          </div>
+
+          <div>
+            <label class="text-xs font-medium text-slate-300 block mb-1">Ghi chú phụ dưới tên</label>
+            <input id="cell-sublabel-input" type="text" maxlength="22" oninput="updateSelectedCellProps()" placeholder="Ví dụ: Hút VP1, Thả VP1..." class="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-300 focus:outline-none focus:border-indigo-500" />
+          </div>
+
+          <!-- Tùy chọn riêng cho Điểm xuất phát: Hướng đầu xe -->
+          <div id="start-heading-group" class="hidden space-y-1.5">
+            <label class="text-xs font-medium text-slate-300 block">Hướng đặt Robot ban đầu</label>
+            <div class="grid grid-cols-4 gap-1">
+              <button type="button" onclick="setStartHeading(0)" id="hd-btn-0" class="py-1.5 rounded-lg text-[11px] font-medium border border-slate-800 bg-slate-950 text-slate-400">Bắc (0°)</button>
+              <button type="button" onclick="setStartHeading(90)" id="hd-btn-90" class="py-1.5 rounded-lg text-[11px] font-medium border border-slate-800 bg-slate-950 text-slate-400">Đông (90°)</button>
+              <button type="button" onclick="setStartHeading(180)" id="hd-btn-180" class="py-1.5 rounded-lg text-[11px] font-medium border border-slate-800 bg-slate-950 text-slate-400">Nam (180°)</button>
+              <button type="button" onclick="setStartHeading(270)" id="hd-btn-270" class="py-1.5 rounded-lg text-[11px] font-medium border border-slate-800 bg-slate-950 text-slate-400">Tây (270°)</button>
+            </div>
+          </div>
+
+          <!-- Tùy chọn riêng cho Vị trí lấy vật phẩm: Đặt đĩa kim loại -->
+          <div id="station-item-group" class="hidden space-y-2">
+            <div class="flex items-center justify-between">
+              <label class="text-xs font-medium text-slate-300">Đặt vật phẩm kim loại tại ô này</label>
+              <input id="cell-has-item" type="checkbox" onchange="updateSelectedCellProps()" class="rounded bg-slate-900 border-slate-700 text-indigo-600 focus:ring-0" />
+            </div>
+            <div id="item-color-row" class="flex items-center justify-between gap-2 pt-1">
+              <span class="text-[11px] text-slate-400">Màu sắc vật phẩm</span>
+              <div class="flex items-center gap-1.5">
+                <button type="button" onclick="setItemColor('#ef4444')" class="w-5 h-5 rounded-full bg-red-500 border-2 border-white/80"></button>
+                <button type="button" onclick="setItemColor('#f97316')" class="w-5 h-5 rounded-full bg-orange-500 border-2 border-transparent"></button>
+                <button type="button" onclick="setItemColor('#eab308')" class="w-5 h-5 rounded-full bg-yellow-500 border-2 border-transparent"></button>
+                <button type="button" onclick="setItemColor('#3b82f6')" class="w-5 h-5 rounded-full bg-blue-500 border-2 border-transparent"></button>
+                <button type="button" onclick="setItemColor('#a855f7')" class="w-5 h-5 rounded-full bg-purple-500 border-2 border-transparent"></button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Danh sách tóm tắt các vùng đã cấu hình trên sa bàn -->
+      <div class="space-y-2">
+        <div class="flex items-center justify-between">
+          <span class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Các vùng đã đánh dấu</span>
+          <span id="configured-zones-count" class="text-[11px] text-slate-500">5 vùng</span>
+        </div>
+        <div id="configured-zones-list" class="space-y-1.5">
+          <!-- Render tự động -->
+        </div>
+      </div>
+    </div>
+
+    <!-- NỘI DUNG TAB 2: KỊCH BẢN DI CHUYỂN (CHUỖI ĐIỂM CHẠM) -->
+    <div id="admin-tab-waypoints" class="hidden flex-1 overflow-y-auto p-5 space-y-4">
+      
+      <!-- Hướng dẫn & Nút thêm nhanh bằng click trên sa bàn -->
+      <div class="p-3 rounded-xl bg-indigo-950/30 border border-indigo-500/25 flex items-center justify-between gap-3">
+        <div class="text-xs text-indigo-200 leading-relaxed">
+          Nhấp vào bất kỳ ô nào trên sa bàn 3D để <strong>thêm Điểm chạm mới</strong> hoặc cập nhật ô đích cho điểm chạm đang chọn.
+        </div>
+        <button type="button" onclick="addNewWaypointFromCurrentOrDefault()" class="shrink-0 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white smooth-transition">
+          Thêm điểm
+        </button>
+      </div>
+
+      <!-- Danh sách các Điểm chạm (Waypoints) -->
+      <div id="waypoints-list" class="space-y-3">
+        <!-- Render tự động -->
+      </div>
+    </div>
+
+    <!-- NỘI DUNG TAB 3: CÀI ĐẶT BIÊN DỊCH & LƯU TRỮ KỊCH BẢN -->
+    <div id="admin-tab-settings" class="hidden flex-1 overflow-y-auto p-5 space-y-4">
+      <div class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-3">
+        <div class="text-xs font-semibold text-white">Chế độ chia bước di chuyển</div>
+        <p class="text-[11px] text-slate-400 leading-relaxed">
+          Tùy chỉnh cách hệ thống biên dịch lộ trình thành các bước khi học viên nhấn nút "Bước tiếp".
+        </p>
+        <div class="grid grid-cols-1 gap-2 pt-1">
+          <button type="button" id="step-mode-corridor" onclick="setStepGranularity('corridor')" class="p-2.5 rounded-lg border text-left smooth-transition">
+            <div class="text-xs font-semibold text-white">Gộp theo đoạn thẳng hành lang (Khuyên dùng)</div>
+            <div class="text-[11px] text-slate-400 mt-0.5">Mỗi bước đi hết một đoạn thẳng (ví dụ: Tiến 750mm qua 3 ô) rồi mới dừng để xoay.</div>
+          </button>
+          <button type="button" id="step-mode-single" onclick="setStepGranularity('single')" class="p-2.5 rounded-lg border text-left smooth-transition">
+            <div class="text-xs font-semibold text-white">Tách từng ô vuông đơn lẻ (250mm / bước)</div>
+            <div class="text-[11px] text-slate-400 mt-0.5">Mỗi lần nhấn Bước tiếp, Robot di chuyển đúng 1 ô (250mm) để học viên đếm số ô.</div>
+          </button>
+        </div>
+      </div>
+
+      <!-- Xuất / Nhập JSON cấu hình đề bài -->
+      <div class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2.5">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-semibold text-white">Mã cấu hình đề bài (JSON)</span>
+          <button type="button" onclick="copyScenarioJSON()" id="copy-json-btn" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[11px] font-medium text-slate-200 border border-slate-700">
+            Sao chép mã
+          </button>
+        </div>
+        <textarea id="scenario-json-box" rows="5" class="w-full p-2.5 rounded-lg bg-slate-950 border border-slate-800 text-[11px] font-mono text-slate-300 focus:outline-none focus:border-indigo-500" placeholder="Dán mã JSON cấu hình sa bàn vào đây..."></textarea>
+        <button type="button" onclick="importScenarioJSON()" class="w-full py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white border border-slate-700 smooth-transition">
+          Nạp cấu hình từ mã JSON
+        </button>
+      </div>
+    </div>
+
+    <!-- Footer của Drawer: Tổng kết số bước đã sinh -->
+    <div class="px-5 py-3 bg-slate-950/90 border-t border-slate-800/80 flex items-center justify-between">
+      <div class="text-xs text-slate-400">
+        Tổng số bước sinh tự động: <strong id="compiled-steps-count" class="text-white">32 bước</strong>
+      </div>
+      <button type="button" onclick="compileScenarioAndReset(); switchAppMode('student');" class="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold text-white shadow-sm smooth-transition">
+        Hoàn tất & Chạy thử
+      </button>
+    </div>
+  </aside>
+
+  <!-- 4. THANH ĐIỀU KHIỂN BƯỚC CHẠY TỐI GIẢN Ở ĐÁY MÀN HÌNH -->
+  <footer class="fixed bottom-4 left-1/2 -translate-x-1/2 z-20 w-[94vw] max-w-[680px] pointer-events-none">
+    <div class="glass-surface px-4 py-3 rounded-2xl shadow-2xl pointer-events-auto flex flex-col gap-2.5">
+      
+      <!-- Dòng trạng thái bước hiện tại & Đèn báo LED / Nam châm bằng chấm màu hình học -->
+      <div class="flex items-center justify-between gap-3 text-xs">
+        <div class="flex items-center gap-2.5 min-w-0">
+          <span id="hud-step-counter" class="px-2 py-0.5 rounded-md bg-slate-800 text-slate-200 font-semibold text-[11px] shrink-0 border border-slate-700">
+            Bước 0 / 32
+          </span>
+          <span id="hud-step-title" class="font-medium text-slate-100 truncate">
+            Vị trí xuất phát (Hàng 5, Cột 1) — Sẵn sàng
+          </span>
+        </div>
+
+        <!-- Chỉ báo trạng thái phần cứng Robot tối giản -->
+        <div class="hidden sm:flex items-center gap-3 shrink-0 text-[11px] text-slate-300">
+          <div class="flex items-center gap-1.5">
+            <span id="hud-led-dot" class="w-2.5 h-2.5 rounded-full bg-slate-600 inline-block"></span>
+            <span id="hud-led-label">LED: Tắt</span>
+          </div>
+          <div class="w-[1px] h-3 bg-slate-700"></div>
+          <div class="flex items-center gap-1.5">
+            <span id="hud-mag-dot" class="w-2.5 h-2.5 rounded-full bg-slate-600 inline-block"></span>
+            <span id="hud-mag-label">Nam châm: Nghỉ</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Thanh tiến trình mỏng -->
+      <div class="w-full h-1 bg-slate-800 rounded-full overflow-hidden">
+        <div id="hud-progress-bar" class="h-full bg-indigo-500 w-0 smooth-transition"></div>
+      </div>
+
+      <!-- Hàng nút điều khiển bước chạy (Chỉ dùng chữ rõ ràng, không dùng icon) -->
+      <div class="flex items-center justify-between gap-2">
+        <div class="flex items-center gap-1.5">
+          <button type="button" onclick="resetSim()" class="px-3 py-1.5 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-xs font-medium text-slate-300 border border-slate-700/80 smooth-transition">
+            Đặt lại
+          </button>
+          <div class="hidden sm:flex items-center bg-slate-900/90 p-0.5 rounded-lg border border-slate-800 text-[11px]">
+            <button type="button" onclick="setSpeed(0.6)" id="spd-0.6" class="px-2 py-1 rounded-md text-slate-400 hover:text-white">0.5x</button>
+            <button type="button" onclick="setSpeed(1)" id="spd-1" class="px-2 py-1 rounded-md bg-slate-800 text-white font-medium">1x</button>
+            <button type="button" onclick="setSpeed(2)" id="spd-2" class="px-2 py-1 rounded-md text-slate-400 hover:text-white">2x</button>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <button type="button" id="btn-prev" onclick="stepBackward()" class="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-35 disabled:pointer-events-none text-xs font-medium text-slate-200 border border-slate-700 smooth-transition">
+            Bước trước
+          </button>
+          <button type="button" id="btn-play" onclick="toggleAutoPlay()" class="px-4 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-emerald-400 border border-emerald-500/30 smooth-transition">
+            Tự động chạy
+          </button>
+          <button type="button" id="btn-next" onclick="stepForward()" class="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-35 disabled:pointer-events-none text-xs font-semibold text-white shadow-sm smooth-transition">
+            Bước tiếp theo
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </footer>
+
+  <!-- 5. TOÀN BỘ LOGIC HỆ THỐNG: ĐỒ THỊ SA BÀN, TÌM ĐƯỜNG BFS, COMPILER & THREE.JS -->
+  <script>
+    /*************************************************************************
+     * PHẦN 1: CẤU TRÚC VÁCH NGĂN CỐ ĐỊNH CỦA SA BÀN 5x5 & THUẬT TOÁN BFS
+     *************************************************************************/
+    const TILE_SIZE = 2.0; // 1 ô = 250mm thực tế = 2.0 đơn vị 3D
+
+    function cellToWorld(row, col) {
+      return {
+        x: (col - 3) * TILE_SIZE,
+        z: (row - 3) * TILE_SIZE
+      };
+    }
+
+    function cellKey(r, c) {
+      return `${r},${c}`;
+    }
+
+    // Danh sách các cặp ô liền kề bị chặn bởi vách ngăn trên sa bàn thực tế
+    const BLOCKED_EDGES = new Set();
+    function blockEdge(r1, c1, r2, c2) {
+      BLOCKED_EDGES.add(`${r1},${c1}-${r2},${c2}`);
+      BLOCKED_EDGES.add(`${r2},${c2}-${r1},${c1}`);
+    }
+
+    function initFixedMazeWalls() {
+      // 1. Vách ngang phía dưới Vị trí 2: ngăn (1,1)<->(2,1) và (1,2)<->(2,2)
+      blockEdge(1, 1, 2, 1);
+      blockEdge(1, 2, 2, 2);
+
+      // 2. Hai vách dọc tạo Kho 1 và Kho 2: ngăn (1,3)<->(1,4) và (1,4)<->(1,5)
+      blockEdge(1, 3, 1, 4);
+      blockEdge(1, 4, 1, 5);
+
+      // 3. Cụm vách chữ L bên trái: ngăn (4,1)<->(5,1), (3,1)<->(3,2), (4,1)<->(4,2)
+      blockEdge(4, 1, 5, 1);
+      blockEdge(3, 1, 3, 2);
+      blockEdge(4, 1, 4, 2);
+
+      // 4. Cụm vách chữ U trung tâm bao quanh ô (3,3):
+      blockEdge(3, 2, 3, 3);
+      blockEdge(3, 3, 4, 3);
+      blockEdge(3, 3, 3, 4);
+
+      // 5. Cụm vách chữ L ngược bên phải: ngăn (2,5)<->(3,5) và (3,4)<->(3,5)
+      blockEdge(2, 5, 3, 5);
+      blockEdge(3, 4, 3, 5);
+
+      // 6. Cụm vách chữ L nằm ngang phía dưới: ngăn (5,2)<->(5,3), (4,3)<->(5,3), (4,4)<->(5,4)
+      blockEdge(5, 2, 5, 3);
+      blockEdge(4, 3, 5, 3);
+      blockEdge(4, 4, 5, 4);
+    }
+    initFixedMazeWalls();
+
+    // Kiểm tra 2 ô liền kề có đi thông qua nhau được không
+    function canMoveBetween(r1, c1, r2, c2) {
+      if (r2 < 1 || r2 > 5 || c2 < 1 || c2 > 5) return false;
+      if (Math.abs(r1 - r2) + Math.abs(c1 - c2) !== 1) return false;
+      return !BLOCKED_EDGES.has(`${r1},${c1}-${r2},${c2}`);
+    }
+
+    // Tìm đường đi ngắn nhất giữa 2 ô trên sa bàn bằng BFS (Tránh mọi vách ngăn)
+    function findShortestCellPath(startR, startC, targetR, targetC) {
+      if (startR === targetR && startC === targetC) {
+        return [{ row: startR, col: startC }];
+      }
+      const queue = [[{ row: startR, col: startC }]];
+      const visited = new Set([cellKey(startR, startC)]);
+
+      // Ưu tiên hướng đi tự nhiên trên sa bàn
+      const dirs = [
+        { dr: -1, dc: 0 }, // Bắc
+        { dr: 0, dc: 1 },  // Đông
+        { dr: 1, dc: 0 },  // Nam
+        { dr: 0, dc: -1 }  // Tây
+      ];
+
+      while (queue.length > 0) {
+        const path = queue.shift();
+        const curr = path[path.length - 1];
+
+        if (curr.row === targetR && curr.col === targetC) {
+          return path;
+        }
+
+        for (const d of dirs) {
+          const nr = curr.row + d.dr;
+          const nc = curr.col + d.dc;
+          const k = cellKey(nr, nc);
+          if (!visited.has(k) && canMoveBetween(curr.row, curr.col, nr, nc)) {
+            visited.add(k);
+            queue.push([...path, { row: nr, col: nc }]);
+          }
+        }
+      }
+      return [{ row: startR, col: startC }];
+    }
+
+    /*************************************************************************
+     * PHẦN 2: DỮ LIỆU CẤU HÌNH SA BÀN (SCENARIO STATE) & BỘ BIÊN DỊCH BƯỚC CHẠY
+     *************************************************************************/
+    let appMode = 'student'; // 'student' | 'admin'
+    let adminTab = 'zones';  // 'zones' | 'waypoints' | 'settings'
+    let selectedCell = { row: 5, col: 1 };
+    let activeWaypointIndex = 0; // Waypoint đang được chọn để gán ô khi ở tab Waypoints
+
+    let scenarioConfig = null;
+    let compiledSteps = [];
+
+    // Tạo kịch bản mặc định (Bài toán 4 điểm chuẩn theo đề bài)
+    function createDefault4PointConfig() {
+      return {
+        stepGranularity: 'corridor', // 'corridor' (gộp đoạn thẳng) | 'single' (từng ô 250mm)
+        start: { row: 5, col: 1, heading: 90, label: 'START', sublabel: 'Nhấn Bumper' },
+        cells: {
+          '5,1': { role: 'start', label: 'START', sublabel: 'Nhấn Bumper', itemColor: '#ef4444', hasItem: false },
+          '4,1': { role: 'station', label: 'VỊ TRÍ 1', sublabel: 'LED Đỏ - Hút', itemColor: '#ef4444', hasItem: true },
+          '1,1': { role: 'station', label: 'VỊ TRÍ 2', sublabel: 'LED Đỏ - Hút', itemColor: '#f97316', hasItem: true },
+          '1,4': { role: 'warehouse', label: 'KHO 1', sublabel: 'Thả - LED Xanh', itemColor: '#10b981', hasItem: false },
+          '1,5': { role: 'warehouse', label: 'KHO 2', sublabel: 'Thả - Nháy 10 lần', itemColor: '#10b981', hasItem: false }
+        },
+        waypoints: [
+          {
+            id: 'wp-1',
+            name: 'Đến Vị trí số 1',
+            row: 4, col: 1,
+            ledAction: 'red',       // 'keep' | 'off' | 'red' | 'green' | 'blink'
+            magnetAction: 'pickup', // 'none' | 'pickup' | 'drop'
+            reverseExitCells: 2     // Số ô lùi ra sau khi thực hiện xong (giúp thoát ngõ cụt mượt mà)
+          },
+          {
+            id: 'wp-2',
+            name: 'Đem về Kho số 1',
+            row: 1, col: 4,
+            ledAction: 'green',
+            magnetAction: 'drop',
+            reverseExitCells: 1
+          },
+          {
+            id: 'wp-3',
+            name: 'Đến Vị trí số 2',
+            row: 1, col: 1,
+            ledAction: 'red',
+            magnetAction: 'pickup',
+            reverseExitCells: 2
+          },
+          {
+            id: 'wp-4',
+            name: 'Đem về Kho số 2 & Kết thúc',
+            row: 1, col: 5,
+            ledAction: 'blink',
+            magnetAction: 'drop',
+            reverseExitCells: 0
+          }
+        ]
+      };
+    }
+
+    // Góc hướng từ ô (r1,c1) sang ô kề (r2,c2)
+    function getDirectionHeading(r1, c1, r2, c2) {
+      if (r2 < r1) return 0;   // Bắc
+      if (c2 > c1) return 90;  // Đông
+      if (r2 > r1) return 180; // Nam
+      return 270;              // Tây
+    }
+
+    function normalizeAngle(deg) {
+      return ((deg % 360) + 360) % 360;
+    }
+
+    // Biên dịch cấu hình của Admin thành danh sách các bước chạy chi tiết cho Robot
+    function compileScenarioSteps(config) {
+      const steps = [];
+      let curR = config.start.row;
+      let curC = config.start.col;
+      let curH = config.start.heading;
+      let curLed = 'off';
+      let curMag = 'idle';
+
+      // Khởi tạo danh sách vật phẩm động dựa trên các ô có hasItem = true
+      const initialItems = {};
+      Object.keys(config.cells).forEach(key => {
+        const cell = config.cells[key];
+        if (cell.role === 'station' && cell.hasItem) {
+          const [r, c] = key.split(',').map(Number);
+          initialItems[key] = {
+            id: key,
+            originRow: r,
+            originCol: c,
+            color: cell.itemColor || '#ef4444',
+            state: 'at_origin', // 'at_origin' | 'carried' | 'dropped'
+            dropRow: r,
+            dropCol: c,
+            dropHeading: 0
+          };
+        }
+      });
+
+      function cloneItemsState(itemsMap) {
+        const copy = {};
+        Object.keys(itemsMap).forEach(k => {
+          copy[k] = { ...itemsMap[k] };
+        });
+        return copy;
+      }
+
+      let itemsState = cloneItemsState(initialItems);
+      let carriedItemKey = null;
+
+      function pushStep(title, phase, ledState, magState) {
+        steps.push({
+          step: steps.length,
+          phase,
+          title,
+          row: curR,
+          col: curC,
+          heading: curH,
+          led: ledState,
+          magnet: magState,
+          items: cloneItemsState(itemsState)
+        });
+      }
+
+      // Bước 0: Đặt Robot tại vị trí Xuất phát
+      pushStep(
+        `Đặt Robot tại ${config.start.label || 'START'} (Hàng ${curR}, Cột ${curC})`,
+        'Chuẩn bị',
+        curLed,
+        curMag
+      );
+
+      // Bước 1: Nhấn công tắc LED Bumper để khởi hành
+      pushStep(
+        `Nhấn công tắc LED Bumper — Bắt đầu hành trình`,
+        'Khởi hành',
+        curLed,
+        curMag
+      );
+
+      // Duyệt qua từng Điểm chạm (Waypoint) do Admin cấu hình
+      config.waypoints.forEach((wp, wpIdx) => {
+        const phaseLabel = `Chặng ${wpIdx + 1}: ${wp.name || `Điểm chạm ${wpIdx + 1}`}`;
+        const path = findShortestCellPath(curR, curC, wp.row, wp.col);
+
+        // Chuyển đổi chuỗi ô trong path thành các đoạn thẳng (Segments)
+        let i = 0;
+        while (i < path.length - 1) {
+          const nextCell = path[i + 1];
+          const neededHeading = getDirectionHeading(curR, curC, nextCell.row, nextCell.col);
+
+          // Nếu hướng hiện tại chưa trùng hướng cần đi -> Thêm bước Xoay
+          if (normalizeAngle(curH) !== neededHeading) {
+            let diff = neededHeading - normalizeAngle(curH);
+            if (diff > 180) diff -= 360;
+            if (diff < -180) diff += 360;
+
+            curH = neededHeading;
+            let turnLabel = `Rẽ phải 90 độ`;
+            if (diff === -90) turnLabel = `Rẽ trái 90 độ`;
+            else if (Math.abs(diff) === 180) turnLabel = `Quay đầu 180 độ`;
+
+            pushStep(turnLabel, phaseLabel, curLed, curMag);
+          }
+
+          // Tính số ô đi thẳng liên tiếp cùng hướng
+          let runCount = 1;
+          if (config.stepGranularity === 'corridor') {
+            while (
+              i + runCount < path.length - 1 &&
+              getDirectionHeading(
+                path[i + runCount].row,
+                path[i + runCount].col,
+                path[i + runCount + 1].row,
+                path[i + runCount + 1].col
+              ) === neededHeading
+            ) {
+              runCount++;
+            }
+          }
+
+          const targetSegmentCell = path[i + runCount];
+          curR = targetSegmentCell.row;
+          curC = targetSegmentCell.col;
+          const mmDist = runCount * 250;
+          pushStep(
+            `Tiến thẳng ${mmDist} mm (${runCount} ô) đến (${curR}, ${curC})`,
+            phaseLabel,
+            curLed,
+            curMag
+          );
+
+          i += runCount;
+        }
+
+        // Khi đã đến Điểm chạm: Thực hiện hành động Đèn LED & Nam châm điện
+        const hasLedChange = wp.ledAction && wp.ledAction !== 'keep';
+        const hasMagAction = wp.magnetAction && wp.magnetAction !== 'none';
+
+        if (hasLedChange || hasMagAction) {
+          // Nếu kết hợp Thả vật phẩm và Nhấp nháy 10 lần (như ở Kho 2), tách làm 2 bước rõ ràng cho học viên
+          if (wp.magnetAction === 'drop' && wp.ledAction === 'blink') {
+            curMag = 'drop';
+            if (carriedItemKey && itemsState[carriedItemKey]) {
+              itemsState[carriedItemKey].state = 'dropped';
+              itemsState[carriedItemKey].dropRow = curR;
+              itemsState[carriedItemKey].dropCol = curC;
+              itemsState[carriedItemKey].dropHeading = curH;
+              carriedItemKey = null;
+            }
+            pushStep(
+              `Tại (${curR}, ${curC}): Ngắt nam châm điện — Thả vật phẩm vào kho`,
+              phaseLabel,
+              curLed,
+              'drop'
+            );
+            curMag = 'idle';
+            curLed = 'blink';
+            pushStep(
+              `Hoàn thành nhiệm vụ: Nhấp nháy đèn LED Xanh - Đỏ 10 lần`,
+              'Kết thúc',
+              'blink',
+              'idle'
+            );
+          } else {
+            const actionParts = [];
+            if (hasLedChange) {
+              curLed = wp.ledAction;
+              const ledNames = {
+                off: 'Tắt đèn LED',
+                red: 'Bật LED màu Đỏ',
+                green: 'Bật LED màu Xanh lá',
+                blink: 'Nhấp nháy LED Xanh - Đỏ 10 lần'
+              };
+              actionParts.push(ledNames[wp.ledAction] || '');
+            }
+
+            if (wp.magnetAction === 'pickup') {
+              curMag = 'boost';
+              const hereKey = cellKey(curR, curC);
+              if (!carriedItemKey && itemsState[hereKey] && itemsState[hereKey].state === 'at_origin') {
+                itemsState[hereKey].state = 'carried';
+                carriedItemKey = hereKey;
+              }
+              actionParts.push('Nam châm điện Hút vật phẩm');
+            } else if (wp.magnetAction === 'drop') {
+              curMag = 'drop';
+              if (carriedItemKey && itemsState[carriedItemKey]) {
+                itemsState[carriedItemKey].state = 'dropped';
+                itemsState[carriedItemKey].dropRow = curR;
+                itemsState[carriedItemKey].dropCol = curC;
+                itemsState[carriedItemKey].dropHeading = curH;
+                carriedItemKey = null;
+              }
+              actionParts.push('Nam châm điện Thả vật phẩm');
+            }
+
+            pushStep(
+              `Tại (${curR}, ${curC}): ${actionParts.join(' + ')}`,
+              phaseLabel,
+              curLed,
+              curMag
+            );
+
+            if (curMag === 'drop') curMag = 'idle';
+          }
+        }
+
+        // Nếu có bước đi lùi thoát khỏi ngõ cụt (Reverse Exit) để chuẩn bị cho chặng tiếp theo
+        if (wpIdx < config.waypoints.length - 1) {
+          const nextWp = config.waypoints[wpIdx + 1];
+          const nextPath = findShortestCellPath(curR, curC, nextWp.row, nextWp.col);
+
+          // Kiểm tra xem hướng đi ra có ngược 180 độ với hướng mũi xe hiện tại không
+          if (nextPath.length > 1) {
+            const firstOutHeading = getDirectionHeading(curR, curC, nextPath[1].row, nextPath[1].col);
+            const oppositeHeading = normalizeAngle(curH + 180);
+
+            if (firstOutHeading === oppositeHeading) {
+              // Tự động lùi xe dọc theo hành lang ngược hướng mũi xe để giữ nam châm ở phía trước
+              let revCount = 1;
+              while (
+                revCount < nextPath.length - 1 &&
+                getDirectionHeading(
+                  nextPath[revCount].row,
+                  nextPath[revCount].col,
+                  nextPath[revCount + 1].row,
+                  nextPath[revCount + 1].col
+                ) === oppositeHeading
+              ) {
+                revCount++;
+              }
+
+              if (config.stepGranularity === 'single') {
+                for (let s = 1; s <= revCount; s++) {
+                  curR = nextPath[s].row;
+                  curC = nextPath[s].col;
+                  pushStep(
+                    `Đi lùi 250 mm (1 ô) ra (${curR}, ${curC})`,
+                    `Chặng ${wpIdx + 2}: ${nextWp.name}`,
+                    curLed,
+                    curMag
+                  );
+                }
+              } else {
+                curR = nextPath[revCount].row;
+                curC = nextPath[revCount].col;
+                pushStep(
+                  `Đi lùi ${revCount * 250} mm (${revCount} ô) ra (${curR}, ${curC})`,
+                  `Chặng ${wpIdx + 2}: ${nextWp.name}`,
+                  curLed,
+                  curMag
+                );
+              }
+            }
+          }
+        }
+      });
+
+      return steps;
+    }
+
+    /*************************************************************************
+     * PHẦN 3: KHỞI TẠO KHÔNG GIAN 3D THREE.JS & RAYCASTING CHỌN Ô TRÊN BÀN
+     *************************************************************************/
+    let scene, camera, renderer;
+    let tilesGroup, trailGroup, disksGroup, robotGroup;
+    let tileMeshesMap = {}; // key 'r,c' -> Mesh
+    let hoverHighlightMesh, selectedHighlightMesh;
+    let ledDomeMat, magnetRingMesh, wheels = [];
+    let dynamicDiskMeshes = {}; // key 'r,c' -> Group
+
+    let showTrail = true;
+    let camMode = 'perspective';
+    let spherical = { radius: 14.5, phi: Math.PI / 3.05, theta: 0.32 };
+    let camTarget = new THREE.Vector3(0, 0, 0.3);
+    let isDragging = false, dragMoved = false, dragButton = 0, prevMouse = { x: 0, y: 0 };
+
+    const raycaster = new THREE.Raycaster();
+    const mouseNDC = new THREE.Vector2();
+
+    // Biến hoạt ảnh
+    let currentStepIndex = 0;
+    let isAnimatingStep = false;
+    let animStartTime = 0;
+    let animDuration = 850;
+    let animFrom = null;
+    let animTo = null;
+    let simSpeed = 1.0;
+    let autoPlay = false;
+    let autoPlayTimer = null;
+
+    function initThreeJS() {
+      const container = document.getElementById('canvas-container');
+      const w = container.clientWidth || window.innerWidth;
+      const h = container.clientHeight || window.innerHeight;
+
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x0b1120);
+      scene.fog = new THREE.FogExp2(0x0b1120, 0.016);
+
+      camera = new THREE.PerspectiveCamera(44, w / h, 0.1, 100);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(w, h);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      container.appendChild(renderer.domElement);
+
+      // Ánh sáng dịu, rõ khối
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.68);
+      scene.add(ambientLight);
+
+      const dirLight = new THREE.DirectionalLight(0xffffff, 0.85);
+      dirLight.position.set(8, 16, 10);
+      dirLight.castShadow = true;
+      dirLight.shadow.mapSize.width = 2048;
+      dirLight.shadow.mapSize.height = 2048;
+      const d = 8;
+      dirLight.shadow.camera.left = -d;
+      dirLight.shadow.camera.right = d;
+      dirLight.shadow.camera.top = d;
+      dirLight.shadow.camera.bottom = -d;
+      scene.add(dirLight);
+
+      const fillLight = new THREE.DirectionalLight(0x93c5fd, 0.28);
+      fillLight.position.set(-10, 8, -8);
+      scene.add(fillLight);
+
+      // Khởi tạo các nhóm đối tượng 3D
+      tilesGroup = new THREE.Group();
+      trailGroup = new THREE.Group();
+      disksGroup = new THREE.Group();
+      scene.add(tilesGroup);
+      scene.add(trailGroup);
+      scene.add(disksGroup);
+
+      buildStaticBaseAndWalls();
+      buildSelectionHighlights();
+      buildVexGoRobot();
+
+      // Nạp kịch bản 4 điểm mặc định
+      scenarioConfig = createDefault4PointConfig();
+      rebuildDynamicArenaVisuals();
+      compileScenarioAndReset();
+
+      setupInteractiveEvents(renderer.domElement);
+      window.addEventListener('resize', onWindowResize);
+    }
+
+    // Xây dựng mặt đế và hệ thống vách ngăn cố định của sa bàn
+    function buildStaticBaseAndWalls() {
+      const staticGroup = new THREE.Group();
+
+      const baseGeo = new THREE.BoxGeometry(11.0, 0.32, 11.0);
+      const baseMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.85 });
+      const baseMesh = new THREE.Mesh(baseGeo, baseMat);
+      baseMesh.position.y = -0.17;
+      baseMesh.receiveShadow = true;
+      staticGroup.add(baseMesh);
+
+      const wallHeight = 0.72;
+      const wallThickness = 0.14;
+      const wallMat = new THREE.MeshStandardMaterial({ color: 0xf1f5f9, roughness: 0.4, metalness: 0.08 });
+      const wallCapMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.5 });
+
+      function addWallSegment(x1, z1, x2, z2) {
+        const dx = x2 - x1;
+        const dz = z2 - z1;
+        const length = Math.sqrt(dx * dx + dz * dz) + wallThickness;
+        const cx = (x1 + x2) / 2;
+        const cz = (z1 + z2) / 2;
+        const angle = Math.atan2(dz, dx);
+
+        const wGeo = new THREE.BoxGeometry(length, wallHeight, wallThickness);
+        const wMesh = new THREE.Mesh(wGeo, wallMat);
+        wMesh.position.set(cx, wallHeight / 2, cz);
+        wMesh.rotation.y = -angle;
+        wMesh.castShadow = true;
+        wMesh.receiveShadow = true;
+        staticGroup.add(wMesh);
+
+        const capGeo = new THREE.BoxGeometry(length + 0.01, 0.05, wallThickness + 0.01);
+        const capMesh = new THREE.Mesh(capGeo, wallCapMat);
+        capMesh.position.set(cx, wallHeight + 0.025, cz);
+        capMesh.rotation.y = -angle;
+        staticGroup.add(capMesh);
+      }
+
+      // Khung viền ngoài 5x5
+      addWallSegment(-5, -5, 5, -5);
+      addWallSegment(-5, 5, 5, 5);
+      addWallSegment(-5, -5, -5, 5);
+      addWallSegment(5, -5, 5, 5);
+
+      // Các vách ngăn bên trong đúng theo sa bàn thực tế
+      addWallSegment(-5, -3, -1.35, -3);
+      addWallSegment(1, -5, 1, -3);
+      addWallSegment(3, -5, 3, -3);
+      addWallSegment(-5, 3, -3, 3);
+      addWallSegment(-3, -1, -3, 3);
+      addWallSegment(-1, -1, -1, 1);
+      addWallSegment(-1, 1, 1, 1);
+      addWallSegment(1, -1, 1, 1);
+      addWallSegment(3, -1, 5, -1);
+      addWallSegment(3, -1, 3, 1);
+      addWallSegment(-1, 3, -1, 5);
+      addWallSegment(-1, 3, 3, 3);
+
+      scene.add(staticGroup);
+    }
+
+    // Khung viền sáng khi di chuột / chọn ô trong chế độ Admin
+    function buildSelectionHighlights() {
+      const hGeo = new THREE.RingGeometry(0.78, 0.92, 4);
+      hGeo.rotateZ(Math.PI / 4);
+
+      const hoverMat = new THREE.MeshBasicMaterial({
+        color: 0x818cf8,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.75
+      });
+      hoverHighlightMesh = new THREE.Mesh(hGeo, hoverMat);
+      hoverHighlightMesh.rotation.x = -Math.PI / 2;
+      hoverHighlightMesh.position.y = 0.03;
+      hoverHighlightMesh.visible = false;
+      scene.add(hoverHighlightMesh);
+
+      const selGeo = new THREE.RingGeometry(0.82, 0.96, 4);
+      selGeo.rotateZ(Math.PI / 4);
+      const selMat = new THREE.MeshBasicMaterial({
+        color: 0x6366f1,
+        side: THREE.DoubleSide
+      });
+      selectedHighlightMesh = new THREE.Mesh(selGeo, selMat);
+      selectedHighlightMesh.rotation.x = -Math.PI / 2;
+      selectedHighlightMesh.position.y = 0.025;
+      selectedHighlightMesh.visible = false;
+      scene.add(selectedHighlightMesh);
+    }
+
+    // Vẽ mặt gạch 25 ô theo cấu hình hiện tại của Admin
+    function createFloorTileTexture(bgColor, borderColor, titleText, subText, textColor, coordText) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 256;
+      canvas.height = 256;
+      const ctx = canvas.getContext('2d');
+
+      ctx.fillStyle = bgColor;
+      ctx.fillRect(0, 0, 256, 256);
+
+      ctx.strokeStyle = borderColor;
+      ctx.lineWidth = 6;
+      ctx.strokeRect(3, 3, 250, 250);
+
+      // Lỗ chốt VEX GO
+      ctx.fillStyle = borderColor;
+      [22, 234].forEach(hx => {
+        [22, 234].forEach(hy => {
+          ctx.beginPath();
+          ctx.arc(hx, hy, 4.5, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      });
+
+      // Tọa độ (Hàng, Cột)
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '600 19px Inter, Arial, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(coordText, 236, 234);
+
+      if (titleText) {
+        ctx.fillStyle = textColor;
+        ctx.font = '700 32px Inter, Arial, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(titleText, 128, 122);
+      }
+      if (subText) {
+        ctx.fillStyle = textColor;
+        ctx.font = '500 19px Inter, Arial, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(subText, 128, 156);
+      }
+
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.anisotropy = 4;
+      return tex;
+    }
+
+    // Cập nhật toàn bộ mặt sàn 25 ô, các đĩa vật phẩm và đường kẻ lộ trình
+    function rebuildDynamicArenaVisuals() {
+      // 1. Xóa các ô cũ
+      while (tilesGroup.children.length > 0) {
+        const m = tilesGroup.children[0];
+        if (m.material && m.material.map) m.material.map.dispose();
+        if (m.material) m.material.dispose();
+        tilesGroup.remove(m);
+      }
+      tileMeshesMap = {};
+
+      for (let r = 1; r <= 5; r++) {
+        for (let c = 1; c <= 5; c++) {
+          const key = cellKey(r, c);
+          const cfg = scenarioConfig.cells[key] || { role: 'empty', label: '', sublabel: '' };
+
+          let bg = '#f8fafc';
+          let border = '#cbd5e1';
+          let tColor = '#334155';
+
+          if (cfg.role === 'start') {
+            bg = '#dbeafe'; border = '#93c5fd'; tColor = '#1d4ed8';
+          } else if (cfg.role === 'station') {
+            bg = '#fee2e2'; border = '#fca5a5'; tColor = '#b91c1c';
+          } else if (cfg.role === 'warehouse') {
+            bg = '#dcfce7'; border = '#86efac'; tColor = '#15803d';
+          }
+
+          const tex = createFloorTileTexture(bg, border, cfg.label || '', cfg.sublabel || '', tColor, `(${r},${c})`);
+          const tileGeo = new THREE.PlaneGeometry(TILE_SIZE, TILE_SIZE);
+          const tileMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.65, metalness: 0.04 });
+          const tileMesh = new THREE.Mesh(tileGeo, tileMat);
+          tileMesh.rotation.x = -Math.PI / 2;
+          const pos = cellToWorld(r, c);
+          tileMesh.position.set(pos.x, 0.005, pos.z);
+          tileMesh.receiveShadow = true;
+          tileMesh.userData = { row: r, col: c };
+
+          tilesGroup.add(tileMesh);
+          tileMeshesMap[key] = tileMesh;
+        }
+      }
+
+      // 2. Tạo lại các đĩa vật phẩm kim loại
+      while (disksGroup.children.length > 0) {
+        disksGroup.remove(disksGroup.children[0]);
+      }
+      dynamicDiskMeshes = {};
+
+      Object.keys(scenarioConfig.cells).forEach(key => {
+        const cell = scenarioConfig.cells[key];
+        if (cell.role === 'station' && cell.hasItem) {
+          const diskMesh = createVexDiskMesh(cell.itemColor || '#ef4444');
+          disksGroup.add(diskMesh);
+          dynamicDiskMeshes[key] = diskMesh;
+        }
+      });
+
+      // 3. Vẽ lại các đường lộ trình nối qua các Waypoints
+      rebuildTrailLines();
+    }
+
+    function createVexDiskMesh(colorHexStr) {
+      const group = new THREE.Group();
+      const outerGeo = new THREE.CylinderGeometry(0.32, 0.32, 0.08, 28);
+      const outerMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(colorHexStr), roughness: 0.3 });
+      const outerMesh = new THREE.Mesh(outerGeo, outerMat);
+      outerMesh.position.y = 0.04;
+      outerMesh.castShadow = true;
+      group.add(outerMesh);
+
+      const coreGeo = new THREE.CylinderGeometry(0.18, 0.18, 0.09, 24);
+      const coreMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, metalness: 0.85, roughness: 0.2 });
+      const coreMesh = new THREE.Mesh(coreGeo, coreMat);
+      coreMesh.position.y = 0.045;
+      group.add(coreMesh);
+      return group;
+    }
+
+    function rebuildTrailLines() {
+      while (trailGroup.children.length > 0) {
+        trailGroup.remove(trailGroup.children[0]);
+      }
+
+      const legColors = [0xf59f00, 0xef4444, 0x3b82f6, 0x10b981, 0xa855f7, 0xec4899];
+      let curR = scenarioConfig.start.row;
+      let curC = scenarioConfig.start.col;
+
+      scenarioConfig.waypoints.forEach((wp, idx) => {
+        const cellPath = findShortestCellPath(curR, curC, wp.row, wp.col);
+        if (cellPath.length > 1) {
+          const colorHex = legColors[idx % legColors.length];
+          const offset = (idx - 1.5) * 0.08; // Dịch nhẹ để các chặng trùng hành lang không đè khít lên nhau
+          const yHeight = 0.03 + idx * 0.008;
+
+          const pts = cellPath.map(p => {
+            const w = cellToWorld(p.row, p.col);
+            return new THREE.Vector3(w.x + offset, yHeight, w.z + offset);
+          });
+
+          const geo = new THREE.BufferGeometry().setFromPoints(pts);
+          const mat = new THREE.LineBasicMaterial({ color: colorHex, linewidth: 2 });
+          const line = new THREE.Line(geo, mat);
+          trailGroup.add(line);
+
+          const dotGeo = new THREE.SphereGeometry(0.075, 10, 10);
+          const dotMat = new THREE.MeshBasicMaterial({ color: colorHex });
+          pts.forEach(pt => {
+            const dot = new THREE.Mesh(dotGeo, dotMat);
+            dot.position.copy(pt);
+            trailGroup.add(dot);
+          });
+        }
+        curR = wp.row;
+        curC = wp.col;
+      });
+    }
+
+    // Xây dựng mô hình Robot VEX GO 3D
+    function buildVexGoRobot() {
+      robotGroup = new THREE.Group();
+
+      const chassisGeo = new THREE.BoxGeometry(1.05, 0.18, 1.25);
+      const chassisMat = new THREE.MeshStandardMaterial({ color: 0xf97316, roughness: 0.35 });
+      const chassisMesh = new THREE.Mesh(chassisGeo, chassisMat);
+      chassisMesh.position.y = 0.26;
+      chassisMesh.castShadow = true;
+      robotGroup.add(chassisMesh);
+
+      const sideGeo = new THREE.BoxGeometry(1.12, 0.1, 0.9);
+      const sideMat = new THREE.MeshStandardMaterial({ color: 0x0d9488, roughness: 0.4 });
+      const sideMesh = new THREE.Mesh(sideGeo, sideMat);
+      sideMesh.position.y = 0.26;
+      robotGroup.add(sideMesh);
+
+      const brainGeo = new THREE.BoxGeometry(0.68, 0.22, 0.72);
+      const brainMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.3 });
+      const brainMesh = new THREE.Mesh(brainGeo, brainMat);
+      brainMesh.position.set(0, 0.42, 0.05);
+      brainMesh.castShadow = true;
+      robotGroup.add(brainMesh);
+
+      const screenGeo = new THREE.PlaneGeometry(0.36, 0.24);
+      const screenMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
+      const screenMesh = new THREE.Mesh(screenGeo, screenMat);
+      screenMesh.rotation.x = -Math.PI / 2;
+      screenMesh.position.set(0, 0.535, 0.1);
+      robotGroup.add(screenMesh);
+
+      const bumperBaseGeo = new THREE.BoxGeometry(0.46, 0.14, 0.28);
+      const bumperBaseMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.5 });
+      const bumperBase = new THREE.Mesh(bumperBaseGeo, bumperBaseMat);
+      bumperBase.position.set(0, 0.46, -0.45);
+      robotGroup.add(bumperBase);
+
+      const ledDomeGeo = new THREE.CylinderGeometry(0.18, 0.2, 0.12, 24);
+      ledDomeMat = new THREE.MeshStandardMaterial({
+        color: 0x94a3b8,
+        emissive: 0x000000,
+        emissiveIntensity: 0,
+        roughness: 0.2
+      });
+      const ledDome = new THREE.Mesh(ledDomeGeo, ledDomeMat);
+      ledDome.position.set(0, 0.56, -0.45);
+      robotGroup.add(ledDome);
+
+      const armGeo = new THREE.BoxGeometry(0.24, 0.08, 0.4);
+      const armMat = new THREE.MeshStandardMaterial({ color: 0x475569 });
+      const armMesh = new THREE.Mesh(armGeo, armMat);
+      armMesh.position.set(0, 0.26, -0.68);
+      robotGroup.add(armMesh);
+
+      const magnetHeadGeo = new THREE.CylinderGeometry(0.24, 0.24, 0.16, 24);
+      const magnetHeadMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.5, roughness: 0.3 });
+      const magnetHead = new THREE.Mesh(magnetHeadGeo, magnetHeadMat);
+      magnetHead.position.set(0, 0.18, -0.78);
+      magnetHead.castShadow = true;
+      robotGroup.add(magnetHead);
+
+      const ringGeo = new THREE.RingGeometry(0.22, 0.34, 24);
+      const ringMat = new THREE.MeshBasicMaterial({ color: 0xa855f7, side: THREE.DoubleSide, transparent: true, opacity: 0.0 });
+      magnetRingMesh = new THREE.Mesh(ringGeo, ringMat);
+      magnetRingMesh.rotation.x = -Math.PI / 2;
+      magnetRingMesh.position.set(0, 0.09, -0.78);
+      robotGroup.add(magnetRingMesh);
+
+      wheels = [];
+      const wheelGeo = new THREE.CylinderGeometry(0.24, 0.24, 0.14, 24);
+      const wheelMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.6 });
+      const hubGeo = new THREE.CylinderGeometry(0.14, 0.14, 0.15, 12);
+      const hubMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.4 });
+
+      const wheelPositions = [
+        [-0.58, 0.24, -0.36],
+        [ 0.58, 0.24, -0.36],
+        [-0.58, 0.24,  0.36],
+        [ 0.58, 0.24,  0.36]
+      ];
+
+      wheelPositions.forEach(pos => {
+        const wGroup = new THREE.Group();
+        const tire = new THREE.Mesh(wheelGeo, wheelMat);
+        tire.rotation.z = Math.PI / 2;
+        tire.castShadow = true;
+        wGroup.add(tire);
+
+        const hub = new THREE.Mesh(hubGeo, hubMat);
+        hub.rotation.z = Math.PI / 2;
+        wGroup.add(hub);
+
+        const spokeGeo = new THREE.BoxGeometry(0.16, 0.28, 0.05);
+        const spokeMat = new THREE.MeshBasicMaterial({ color: 0xf8fafc });
+        const spoke = new THREE.Mesh(spokeGeo, spokeMat);
+        wGroup.add(spoke);
+
+        wGroup.position.set(pos[0], pos[1], pos[2]);
+        robotGroup.add(wGroup);
+        wheels.push(wGroup);
+      });
+
+      const arrowShape = new THREE.ConeGeometry(0.11, 0.24, 4);
+      const arrowMat = new THREE.MeshBasicMaterial({ color: 0xfacc15 });
+      const arrowMesh = new THREE.Mesh(arrowShape, arrowMat);
+      arrowMesh.rotation.x = -Math.PI / 2;
+      arrowMesh.rotation.y = Math.PI / 4;
+      arrowMesh.position.set(0, 0.38, -0.25);
+      robotGroup.add(arrowMesh);
+
+      scene.add(robotGroup);
+    }
+
+    /*************************************************************************
+     * PHẦN 4: TƯƠNG TÁC CHUỘT, XOAY CAMERA & NHẤP CHỌN Ô TRÊN SA BÀN 3D
+     *************************************************************************/
+    function setupInteractiveEvents(domElement) {
+      const hoverPill = document.getElementById('hover-coord-pill');
+
+      domElement.addEventListener('mousedown', e => {
+        isDragging = true;
+        dragMoved = false;
+        dragButton = e.button;
+        prevMouse = { x: e.clientX, y: e.clientY };
+      });
+
+      window.addEventListener('mouseup', e => {
+        if (isDragging && !dragMoved && e.button === 0 && e.target === domElement) {
+          handleBoardClick(e.clientX, e.clientY);
+        }
+        isDragging = false;
+      });
+
+      window.addEventListener('mousemove', e => {
+        if (isDragging) {
+          const dx = e.clientX - prevMouse.x;
+          const dy = e.clientY - prevMouse.y;
+          if (Math.abs(dx) > 3 || Math.abs(dy) > 3) dragMoved = true;
+          prevMouse = { x: e.clientX, y: e.clientY };
+
+          if (dragButton === 0 && camMode !== 'top') {
+            spherical.theta -= dx * 0.007;
+            spherical.phi = Math.max(0.15, Math.min(Math.PI / 2 - 0.08, spherical.phi - dy * 0.007));
+          } else {
+            const panFactor = 0.015;
+            camTarget.x -= dx * panFactor;
+            camTarget.z -= dy * panFactor;
+          }
+          hoverPill.classList.add('hidden');
+          return;
+        }
+
+        // Raycast kiểm tra ô dưới trỏ chuột khi ở chế độ Admin
+        if (appMode === 'admin' && e.target === domElement) {
+          const hit = raycastTileAt(e.clientX, e.clientY);
+          if (hit) {
+            const pos = cellToWorld(hit.row, hit.col);
+            hoverHighlightMesh.position.set(pos.x, 0.03, pos.z);
+            hoverHighlightMesh.visible = true;
+
+            hoverPill.textContent = `Hàng ${hit.row}, Cột ${hit.col}`;
+            hoverPill.style.left = `${e.clientX}px`;
+            hoverPill.style.top = `${e.clientY}px`;
+            hoverPill.classList.remove('hidden');
+          } else {
+            hoverHighlightMesh.visible = false;
+            hoverPill.classList.add('hidden');
+          }
+        } else {
+          hoverHighlightMesh.visible = false;
+          hoverPill.classList.add('hidden');
+        }
+      });
+
+      domElement.addEventListener('wheel', e => {
+        e.preventDefault();
+        spherical.radius = Math.max(5.5, Math.min(24, spherical.radius + e.deltaY * 0.01));
+      }, { passive: false });
+
+      domElement.addEventListener('contextmenu', e => e.preventDefault());
+    }
+
+    function raycastTileAt(clientX, clientY) {
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouseNDC.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+      mouseNDC.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(mouseNDC, camera);
+      const intersects = raycaster.intersectObjects(tilesGroup.children);
+      if (intersects.length > 0) {
+        return intersects[0].object.userData;
+      }
+      return null;
+    }
+
+    function handleBoardClick(clientX, clientY) {
+      if (appMode !== 'admin') return;
+      const hit = raycastTileAt(clientX, clientY);
+      if (!hit) return;
+
+      selectArenaCell(hit.row, hit.col);
+
+      // Nếu đang ở Tab 2 (Điểm chạm), tự động cập nhật tọa độ cho Điểm chạm đang chọn
+      if (adminTab === 'waypoints' && scenarioConfig.waypoints.length > 0) {
+        if (activeWaypointIndex >= 0 && activeWaypointIndex < scenarioConfig.waypoints.length) {
+          const wp = scenarioConfig.waypoints[activeWaypointIndex];
+          wp.row = hit.row;
+          wp.col = hit.col;
+          const cellCfg = scenarioConfig.cells[cellKey(hit.row, hit.col)];
+          if (cellCfg && cellCfg.label) {
+            wp.name = `Đến ${cellCfg.label}`;
+          } else {
+            wp.name = `Đến ô (${hit.row}, ${hit.col})`;
+          }
+          compileScenarioAndReset();
+          renderWaypointsListUI();
+        }
+      }
+    }
+
+    /*************************************************************************
+     * PHẦN 5: LOGIC QUẢN LÝ GIAO DIỆN ADMIN & CẤU HÌNH SA BÀN
+     *************************************************************************/
+    function switchAppMode(mode) {
+      appMode = mode;
+      const studentBtn = document.getElementById('mode-student-btn');
+      const adminBtn = document.getElementById('mode-admin-btn');
+      const drawer = document.getElementById('admin-drawer');
+      const banner = document.getElementById('admin-pick-banner');
+
+      if (mode === 'admin') {
+        adminBtn.className = "px-3.5 py-1.5 rounded-lg text-xs font-semibold smooth-transition bg-indigo-600 text-white shadow-sm";
+        studentBtn.className = "px-3.5 py-1.5 rounded-lg text-xs font-semibold smooth-transition text-slate-300 hover:text-white hover:bg-slate-800/60";
+        drawer.classList.remove('-translate-x-[430px]', 'opacity-0', 'pointer-events-none');
+        banner.classList.remove('hidden');
+
+        // Dịch nhẹ tâm nhìn camera sang phải một chút để sa bàn cân đối với Drawer bên trái
+        camTarget.set(-1.3, 0, 0.3);
+        selectArenaCell(selectedCell.row, selectedCell.col);
+        renderAdminZoneEditorUI();
+        renderConfiguredZonesListUI();
+        renderWaypointsListUI();
+        syncJSONBox();
+      } else {
+        studentBtn.className = "px-3.5 py-1.5 rounded-lg text-xs font-semibold smooth-transition bg-indigo-600 text-white shadow-sm";
+        adminBtn.className = "px-3.5 py-1.5 rounded-lg text-xs font-semibold smooth-transition text-slate-300 hover:text-white hover:bg-slate-800/60";
+        drawer.classList.add('-translate-x-[430px]', 'opacity-0', 'pointer-events-none');
+        banner.classList.add('hidden');
+        hoverHighlightMesh.visible = false;
+        selectedHighlightMesh.visible = false;
+        document.getElementById('hover-coord-pill').classList.add('hidden');
+
+        camTarget.set(0, 0, 0.3);
+      }
+    }
+
+    function switchAdminTab(tab) {
+      adminTab = tab;
+      ['zones', 'waypoints', 'settings'].forEach(t => {
+        const btn = document.getElementById(`tab-btn-${t}`);
+        const panel = document.getElementById(`admin-tab-${t}`);
+        if (t === tab) {
+          btn.className = "py-1.5 rounded-lg text-xs font-medium smooth-transition bg-slate-800 text-white shadow-sm";
+          panel.classList.remove('hidden');
+        } else {
+          btn.className = "py-1.5 rounded-lg text-xs font-medium smooth-transition text-slate-400 hover:text-slate-200";
+          panel.classList.add('hidden');
+        }
+      });
+
+      const bannerText = document.getElementById('admin-pick-text');
+      if (tab === 'zones') {
+        bannerText.textContent = "Nhấp vào một ô trên sa bàn 3D để cấu hình chức năng và vật phẩm";
+      } else if (tab === 'waypoints') {
+        bannerText.textContent = "Nhấp vào một ô trên sa bàn 3D để gán vị trí đích cho Điểm chạm đang chọn";
+      } else {
+        bannerText.textContent = "Tùy chỉnh chế độ chia bước hoặc sao chép mã JSON của đề bài";
+        syncJSONBox();
+      }
+    }
+
+    function selectArenaCell(row, col) {
+      selectedCell = { row, col };
+      const pos = cellToWorld(row, col);
+      selectedHighlightMesh.position.set(pos.x, 0.025, pos.z);
+      selectedHighlightMesh.visible = (appMode === 'admin');
+      renderAdminZoneEditorUI();
+    }
+
+    function renderAdminZoneEditorUI() {
+      const { row, col } = selectedCell;
+      const key = cellKey(row, col);
+      document.getElementById('selected-cell-badge').textContent = `Hàng ${row}, Cột ${col}`;
+
+      const cell = scenarioConfig.cells[key] || { role: 'empty', label: '', sublabel: '', itemColor: '#ef4444', hasItem: false };
+
+      ['empty', 'start', 'station', 'warehouse'].forEach(r => {
+        const btn = document.getElementById(`role-btn-${r}`);
+        if (cell.role === r) {
+          btn.className = "py-2 px-2.5 rounded-lg text-xs font-semibold border border-indigo-500 bg-indigo-500/20 text-white text-left smooth-transition";
+        } else {
+          btn.className = "py-2 px-2.5 rounded-lg text-xs font-medium border border-slate-800 bg-slate-950 text-slate-400 hover:text-slate-200 text-left smooth-transition";
+        }
+      });
+
+      const detailsBox = document.getElementById('cell-config-details');
+      const startGroup = document.getElementById('start-heading-group');
+      const stationGroup = document.getElementById('station-item-group');
+
+      if (cell.role === 'empty') {
+        detailsBox.classList.add('hidden');
+      } else {
+        detailsBox.classList.remove('hidden');
+        document.getElementById('cell-label-input').value = cell.label || '';
+        document.getElementById('cell-sublabel-input').value = cell.sublabel || '';
+
+        if (cell.role === 'start') {
+          startGroup.classList.remove('hidden');
+          stationGroup.classList.add('hidden');
+          [0, 90, 180, 270].forEach(h => {
+            const hBtn = document.getElementById(`hd-btn-${h}`);
+            if (scenarioConfig.start.heading === h) {
+              hBtn.className = "py-1.5 rounded-lg text-[11px] font-semibold border border-indigo-500 bg-indigo-600 text-white";
+            } else {
+              hBtn.className = "py-1.5 rounded-lg text-[11px] font-medium border border-slate-800 bg-slate-950 text-slate-400 hover:text-white";
+            }
+          });
+        } else if (cell.role === 'station') {
+          startGroup.classList.add('hidden');
+          stationGroup.classList.remove('hidden');
+          document.getElementById('cell-has-item').checked = !!cell.hasItem;
+        } else {
+          startGroup.classList.add('hidden');
+          stationGroup.classList.add('hidden');
+        }
+      }
+    }
+
+    function setCellRole(role) {
+      const { row, col } = selectedCell;
+      const key = cellKey(row, col);
+
+      if (role === 'empty') {
+        delete scenarioConfig.cells[key];
+      } else if (role === 'start') {
+        // Đảm bảo chỉ có 1 ô Start duy nhất trên sa bàn
+        Object.keys(scenarioConfig.cells).forEach(k => {
+          if (scenarioConfig.cells[k].role === 'start') delete scenarioConfig.cells[k];
+        });
+        scenarioConfig.start.row = row;
+        scenarioConfig.start.col = col;
+        scenarioConfig.cells[key] = {
+          role: 'start',
+          label: 'START',
+          sublabel: 'Xuất phát',
+          itemColor: '#ef4444',
+          hasItem: false
+        };
+      } else if (role === 'station') {
+        scenarioConfig.cells[key] = {
+          role: 'station',
+          label: `VỊ TRÍ (${row},${col})`,
+          sublabel: 'Hút vật phẩm',
+          itemColor: '#ef4444',
+          hasItem: true
+        };
+      } else if (role === 'warehouse') {
+        scenarioConfig.cells[key] = {
+          role: 'warehouse',
+          label: `KHO (${row},${col})`,
+          sublabel: 'Thả vật phẩm',
+          itemColor: '#10b981',
+          hasItem: false
+        };
+      }
+
+      compileScenarioAndReset();
+      renderAdminZoneEditorUI();
+      renderConfiguredZonesListUI();
+    }
+
+    function updateSelectedCellProps() {
+      const { row, col } = selectedCell;
+      const key = cellKey(row, col);
+      const cell = scenarioConfig.cells[key];
+      if (!cell) return;
+
+      cell.label = document.getElementById('cell-label-input').value;
+      cell.sublabel = document.getElementById('cell-sublabel-input').value;
+      if (cell.role === 'start') {
+        scenarioConfig.start.label = cell.label;
+      }
+      if (cell.role === 'station') {
+        cell.hasItem = document.getElementById('cell-has-item').checked;
+      }
+
+      compileScenarioAndReset();
+      renderConfiguredZonesListUI();
+    }
+
+    function setStartHeading(headingDeg) {
+      scenarioConfig.start.heading = headingDeg;
+      compileScenarioAndReset();
+      renderAdminZoneEditorUI();
+    }
+
+    function setItemColor(hex) {
+      const key = cellKey(selectedCell.row, selectedCell.col);
+      if (scenarioConfig.cells[key]) {
+        scenarioConfig.cells[key].itemColor = hex;
+        compileScenarioAndReset();
+      }
+    }
+
+    function renderConfiguredZonesListUI() {
+      const listEl = document.getElementById('configured-zones-list');
+      const keys = Object.keys(scenarioConfig.cells);
+      document.getElementById('configured-zones-count').textContent = `${keys.length} vùng`;
+      listEl.innerHTML = '';
+
+      keys.forEach(k => {
+        const [r, c] = k.split(',').map(Number);
+        const cell = scenarioConfig.cells[k];
+        let badgeClass = 'bg-slate-800 text-slate-300';
+        let roleName = 'Ô';
+        if (cell.role === 'start') { badgeClass = 'bg-blue-500/20 text-blue-300 border border-blue-500/30'; roleName = 'Xuất phát'; }
+        else if (cell.role === 'station') { badgeClass = 'bg-rose-500/20 text-rose-300 border border-rose-500/30'; roleName = 'Lấy hàng'; }
+        else if (cell.role === 'warehouse') { badgeClass = 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'; roleName = 'Kho chứa'; }
+
+        const item = document.createElement('div');
+        item.onclick = () => selectArenaCell(r, c);
+        item.className = "p-2.5 rounded-xl bg-slate-900/70 hover:bg-slate-800/80 border border-slate-800/90 flex items-center justify-between cursor-pointer smooth-transition";
+        item.innerHTML = `
+          <div class="flex items-center gap-2.5">
+            <span class="px-2 py-0.5 rounded text-[10px] font-semibold ${badgeClass}">${roleName}</span>
+            <div>
+              <div class="text-xs font-semibold text-white">${cell.label || `Ô (${r},${c})`}</div>
+              <div class="text-[11px] text-slate-400">Hàng ${r}, Cột ${c} ${cell.hasItem ? '• Có vật phẩm' : ''}</div>
+            </div>
+          </div>
+          <span class="text-[11px] text-slate-500 font-medium">Sửa</span>
+        `;
+        listEl.appendChild(item);
+      });
+    }
+
+    // Quản lý danh sách Điểm chạm (Waypoints) ở Tab 2
+    function renderWaypointsListUI() {
+      const container = document.getElementById('waypoints-list');
+      container.innerHTML = '';
+
+      if (scenarioConfig.waypoints.length === 0) {
+        container.innerHTML = `
+          <div class="p-6 rounded-xl border border-dashed border-slate-800 text-center text-xs text-slate-400">
+            Chưa có điểm chạm nào. Nhấn "Thêm điểm" hoặc nhấp vào ô trên sa bàn.
+          </div>
+        `;
+        return;
+      }
+
+      scenarioConfig.waypoints.forEach((wp, idx) => {
+        const isSelected = (idx === activeWaypointIndex);
+        const card = document.createElement('div');
+        card.onclick = () => {
+          activeWaypointIndex = idx;
+          selectArenaCell(wp.row, wp.col);
+          renderWaypointsListUI();
+        };
+        card.className = `p-3.5 rounded-xl border smooth-transition cursor-pointer space-y-2.5 ${
+          isSelected
+            ? 'bg-slate-900 border-indigo-500/80 shadow-lg'
+            : 'bg-slate-900/50 border-slate-800/80 hover:border-slate-700'
+        }`;
+
+        card.innerHTML = `
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded-md text-[11px] font-semibold ${isSelected ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300'}">
+                Điểm ${idx + 1}
+              </span>
+              <span class="text-xs font-semibold text-white">${wp.name || `Điểm chạm ${idx + 1}`}</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-[11px] font-mono text-indigo-300">
+                Ô (${wp.row}, ${wp.col})
+              </span>
+              <button type="button" onclick="event.stopPropagation(); removeWaypoint(${idx})" class="text-[11px] text-slate-500 hover:text-rose-400 px-1">
+                Xóa
+              </button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2 pt-1">
+            <div>
+              <label class="text-[10px] font-medium text-slate-400 block mb-1">Đèn LED Bumper khi đến</label>
+              <select onchange="updateWaypointField(${idx}, 'ledAction', this.value)" onclick="event.stopPropagation()" class="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-indigo-500">
+                <option value="keep" ${wp.ledAction === 'keep' ? 'selected' : ''}>Giữ nguyên</option>
+                <option value="off" ${wp.ledAction === 'off' ? 'selected' : ''}>Tắt đèn</option>
+                <option value="red" ${wp.ledAction === 'red' ? 'selected' : ''}>Bật màu Đỏ</option>
+                <option value="green" ${wp.ledAction === 'green' ? 'selected' : ''}>Bật màu Xanh lá</option>
+                <option value="blink" ${wp.ledAction === 'blink' ? 'selected' : ''}>Nháy Đỏ-Xanh 10 lần</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-[10px] font-medium text-slate-400 block mb-1">Nam châm điện</label>
+              <select onchange="updateWaypointField(${idx}, 'magnetAction', this.value)" onclick="event.stopPropagation()" class="w-full px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-indigo-500">
+                <option value="none" ${wp.magnetAction === 'none' ? 'selected' : ''}>Không thao tác</option>
+                <option value="pickup" ${wp.magnetAction === 'pickup' ? 'selected' : ''}>Hút vật phẩm</option>
+                <option value="drop" ${wp.magnetAction === 'drop' ? 'selected' : ''}>Thả vật phẩm</option>
+              </select>
+            </div>
+          </div>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    function updateWaypointField(idx, field, value) {
+      if (!scenarioConfig.waypoints[idx]) return;
+      scenarioConfig.waypoints[idx][field] = value;
+      compileScenarioAndReset();
+    }
+
+    function addNewWaypointFromCurrentOrDefault() {
+      const r = selectedCell.row;
+      const c = selectedCell.col;
+      const cellCfg = scenarioConfig.cells[cellKey(r, c)];
+      let defaultLed = 'keep';
+      let defaultMag = 'none';
+      if (cellCfg && cellCfg.role === 'station') {
+        defaultLed = 'red';
+        defaultMag = 'pickup';
+      } else if (cellCfg && cellCfg.role === 'warehouse') {
+        defaultLed = 'green';
+        defaultMag = 'drop';
+      }
+
+      scenarioConfig.waypoints.push({
+        id: 'wp-' + Date.now(),
+        name: cellCfg && cellCfg.label ? `Đến ${cellCfg.label}` : `Đến ô (${r}, ${c})`,
+        row: r,
+        col: c,
+        ledAction: defaultLed,
+        magnetAction: defaultMag,
+        reverseExitCells: 0
+      });
+      activeWaypointIndex = scenarioConfig.waypoints.length - 1;
+      compileScenarioAndReset();
+      renderWaypointsListUI();
+    }
+
+    function removeWaypoint(idx) {
+      scenarioConfig.waypoints.splice(idx, 1);
+      if (activeWaypointIndex >= scenarioConfig.waypoints.length) {
+        activeWaypointIndex = Math.max(0, scenarioConfig.waypoints.length - 1);
+      }
+      compileScenarioAndReset();
+      renderWaypointsListUI();
+    }
+
+    function setStepGranularity(mode) {
+      scenarioConfig.stepGranularity = mode;
+      const btnCorridor = document.getElementById('step-mode-corridor');
+      const btnSingle = document.getElementById('step-mode-single');
+      if (mode === 'corridor') {
+        btnCorridor.className = "p-2.5 rounded-lg border border-indigo-500 bg-indigo-500/15 text-left smooth-transition";
+        btnSingle.className = "p-2.5 rounded-lg border border-slate-800 bg-slate-950 text-left smooth-transition";
+      } else {
+        btnSingle.className = "p-2.5 rounded-lg border border-indigo-500 bg-indigo-500/15 text-left smooth-transition";
+        btnCorridor.className = "p-2.5 rounded-lg border border-slate-800 bg-slate-950 text-left smooth-transition";
+      }
+      compileScenarioAndReset();
+    }
+
+    function loadDefault4PointScenario() {
+      scenarioConfig = createDefault4PointConfig();
+      activeWaypointIndex = 0;
+      setStepGranularity('corridor');
+      renderAdminZoneEditorUI();
+      renderConfiguredZonesListUI();
+      renderWaypointsListUI();
+      syncJSONBox();
+    }
+
+    function clearArenaScenario() {
+      scenarioConfig = {
+        stepGranularity: 'corridor',
+        start: { row: 5, col: 1, heading: 90, label: 'START', sublabel: 'Xuất phát' },
+        cells: {
+          '5,1': { role: 'start', label: 'START', sublabel: 'Xuất phát', itemColor: '#ef4444', hasItem: false }
+        },
+        waypoints: []
+      };
+      activeWaypointIndex = 0;
+      selectArenaCell(5, 1);
+      compileScenarioAndReset();
+      renderAdminZoneEditorUI();
+      renderConfiguredZonesListUI();
+      renderWaypointsListUI();
+      syncJSONBox();
+    }
+
+    function syncJSONBox() {
+      const box = document.getElementById('scenario-json-box');
+      if (box) {
+        box.value = JSON.stringify(scenarioConfig, null, 2);
+      }
+    }
+
+    function copyScenarioJSON() {
+      syncJSONBox();
+      const box = document.getElementById('scenario-json-box');
+      box.select();
+      document.execCommand('copy');
+      const btn = document.getElementById('copy-json-btn');
+      btn.textContent = 'Đã sao chép';
+      setTimeout(() => { btn.textContent = 'Sao chép mã'; }, 1500);
+    }
+
+    function importScenarioJSON() {
+      try {
+        const raw = document.getElementById('scenario-json-box').value;
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.start && parsed.cells && Array.isArray(parsed.waypoints)) {
+          scenarioConfig = parsed;
+          compileScenarioAndReset();
+          renderAdminZoneEditorUI();
+          renderConfiguredZonesListUI();
+          renderWaypointsListUI();
+        }
+      } catch (e) {
+        // Bỏ qua nếu JSON lỗi cú pháp
+      }
+    }
+
+    function compileScenarioAndReset() {
+      stopAutoPlay();
+      rebuildDynamicArenaVisuals();
+      compiledSteps = compileScenarioSteps(scenarioConfig);
+      document.getElementById('compiled-steps-count').textContent = `${compiledSteps.length - 1} bước`;
+      applyStepInstant(0);
+      syncJSONBox();
+    }
+
+    /*************************************************************************
+     * PHẦN 6: ĐIỀU KHIỂN CHẠY TỪNG BƯỚC & CẬP NHẬT TRẠNG THÁI 3D
+     *************************************************************************/
+    function headingToRotationY(headingDeg) {
+      return THREE.MathUtils.degToRad(-headingDeg);
+    }
+
+    // Đặt vị trí cho tất cả các đĩa vật phẩm dựa trên trạng thái bước hiện tại
+    function updateDynamicDisksPositions(itemsMap) {
+      if (!itemsMap) return;
+      Object.keys(dynamicDiskMeshes).forEach(key => {
+        const mesh = dynamicDiskMeshes[key];
+        const st = itemsMap[key];
+        if (!st) return;
+
+        if (st.state === 'at_origin') {
+          const w = cellToWorld(st.originRow, st.originCol);
+          mesh.position.set(w.x, 0, w.z);
+        } else if (st.state === 'carried') {
+          const forward = new THREE.Vector3(0, 0, -0.78).applyAxisAngle(new THREE.Vector3(0, 1, 0), robotGroup.rotation.y);
+          mesh.position.set(robotGroup.position.x + forward.x, 0.08, robotGroup.position.z + forward.z);
+        } else if (st.state === 'dropped') {
+          const w = cellToWorld(st.dropRow, st.dropCol);
+          const forward = new THREE.Vector3(0, 0, -0.45).applyAxisAngle(new THREE.Vector3(0, 1, 0), headingToRotationY(st.dropHeading));
+          mesh.position.set(w.x + forward.x, 0, w.z + forward.z);
+        }
+      });
+    }
+
+    function applyStepInstant(index) {
+      if (!compiledSteps || compiledSteps.length === 0) return;
+      isAnimatingStep = false;
+      currentStepIndex = Math.max(0, Math.min(index, compiledSteps.length - 1));
+      const st = compiledSteps[currentStepIndex];
+      const worldPos = cellToWorld(st.row, st.col);
+
+      robotGroup.position.set(worldPos.x, 0, worldPos.z);
+      robotGroup.rotation.y = headingToRotationY(st.heading);
+
+      updateDynamicDisksPositions(st.items);
+      updateBottomHUD(st);
+    }
+
+    function animateToStep(targetIndex) {
+      const prevStep = compiledSteps[currentStepIndex];
+      const nextStep = compiledSteps[targetIndex];
+      currentStepIndex = targetIndex;
+
+      const startWorld = cellToWorld(prevStep.row, prevStep.col);
+      const endWorld = cellToWorld(nextStep.row, nextStep.col);
+
+      let startH = prevStep.heading;
+      let endH = nextStep.heading;
+      let diffH = endH - startH;
+      if (diffH > 180) diffH -= 360;
+      if (diffH < -180) diffH += 360;
+
+      const distCells = Math.abs(nextStep.row - prevStep.row) + Math.abs(nextStep.col - prevStep.col);
+      let baseTime = 700;
+      if (distCells > 1) baseTime = 520 * distCells;
+      else if (distCells === 0 && Math.abs(diffH) === 0) baseTime = 550;
+
+      animDuration = baseTime / simSpeed;
+      animStartTime = performance.now();
+      isAnimatingStep = true;
+
+      animFrom = { x: startWorld.x, z: startWorld.z, heading: startH };
+      animTo = { x: endWorld.x, z: endWorld.z, heading: startH + diffH, stepObj: nextStep };
+
+      updateBottomHUD(nextStep);
+    }
+
+    function stepForward() {
+      if (currentStepIndex >= compiledSteps.length - 1) return;
+      animateToStep(currentStepIndex + 1);
+    }
+
+    function stepBackward() {
+      stopAutoPlay();
+      if (currentStepIndex <= 0) return;
+      applyStepInstant(currentStepIndex - 1);
+    }
+
+    function resetSim() {
+      stopAutoPlay();
+      applyStepInstant(0);
+    }
+
+    function setSpeed(spd) {
+      simSpeed = spd;
+      [0.6, 1, 2].forEach(s => {
+        const btn = document.getElementById('spd-' + s);
+        if (s === spd) {
+          btn.className = "px-2 py-1 rounded-md bg-slate-800 text-white font-medium";
+        } else {
+          btn.className = "px-2 py-1 rounded-md text-slate-400 hover:text-white";
+        }
+      });
+    }
+
+    function toggleAutoPlay() {
+      if (autoPlay) {
+        stopAutoPlay();
+      } else {
+        if (currentStepIndex >= compiledSteps.length - 1) {
+          applyStepInstant(0);
+        }
+        autoPlay = true;
+        const btn = document.getElementById('btn-play');
+        btn.textContent = 'Tạm dừng';
+        btn.className = "px-4 py-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600/30 text-xs font-semibold text-rose-300 border border-rose-500/30 smooth-transition";
+        if (!isAnimatingStep) stepForward();
+      }
+    }
+
+    function stopAutoPlay() {
+      autoPlay = false;
+      if (autoPlayTimer) clearTimeout(autoPlayTimer);
+      const btn = document.getElementById('btn-play');
+      btn.textContent = 'Tự động chạy';
+      btn.className = "px-4 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-emerald-400 border border-emerald-500/30 smooth-transition";
+    }
+
+    function setCameraPreset(mode) {
+      camMode = mode;
+      ['perspective', 'top', 'follow'].forEach(m => {
+        const btn = document.getElementById('cam-' + m);
+        if (m === mode) {
+          btn.className = "px-3 py-1.5 rounded-lg text-xs font-medium smooth-transition bg-slate-800 text-white";
+        } else {
+          btn.className = "px-3 py-1.5 rounded-lg text-xs font-medium smooth-transition text-slate-400 hover:text-slate-200";
+        }
+      });
+
+      const xOffset = (appMode === 'admin') ? -1.3 : 0;
+      if (mode === 'perspective') {
+        spherical = { radius: 14.5, phi: Math.PI / 3.05, theta: 0.32 };
+        camTarget.set(xOffset, 0, 0.3);
+      } else if (mode === 'top') {
+        spherical = { radius: 14.0, phi: 0.01, theta: 0 };
+        camTarget.set(xOffset, 0, 0);
+      } else if (mode === 'follow') {
+        spherical = { radius: 6.5, phi: Math.PI / 3.2, theta: 0.4 };
+      }
+    }
+
+    function toggleTrail() {
+      showTrail = !showTrail;
+      trailGroup.visible = showTrail;
+      const btn = document.getElementById('btn-trail');
+      if (showTrail) {
+        btn.textContent = "Lộ trình: Hiện";
+        btn.className = "px-3 py-1.5 rounded-lg text-xs font-medium smooth-transition text-emerald-300 bg-emerald-500/10 border border-emerald-500/20";
+      } else {
+        btn.textContent = "Lộ trình: Ẩn";
+        btn.className = "px-3 py-1.5 rounded-lg text-xs font-medium smooth-transition text-slate-400 hover:text-slate-200";
+      }
+    }
+
+    function updateBottomHUD(st) {
+      const total = Math.max(1, compiledSteps.length - 1);
+      const pct = (st.step / total) * 100;
+      document.getElementById('hud-progress-bar').style.width = `${pct}%`;
+      document.getElementById('hud-step-counter').textContent = `Bước ${st.step} / ${total}`;
+      document.getElementById('hud-step-title').textContent = `${st.phase} — ${st.title}`;
+
+      document.getElementById('btn-prev').disabled = (st.step === 0);
+      document.getElementById('btn-next').disabled = (st.step >= total);
+
+      // Chỉ báo LED Bumper
+      const ledDot = document.getElementById('hud-led-dot');
+      const ledLabel = document.getElementById('hud-led-label');
+      if (st.led === 'red') {
+        ledDot.className = "w-2.5 h-2.5 rounded-full bg-red-500 inline-block shadow-[0_0_8px_#ef4444]";
+        ledLabel.textContent = "LED: Đỏ";
+      } else if (st.led === 'green') {
+        ledDot.className = "w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block shadow-[0_0_8px_#10b981]";
+        ledLabel.textContent = "LED: Xanh lá";
+      } else if (st.led === 'blink') {
+        ledDot.className = "w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping inline-block";
+        ledLabel.textContent = "LED: Nháy 10 lần";
+      } else {
+        ledDot.className = "w-2.5 h-2.5 rounded-full bg-slate-600 inline-block";
+        ledLabel.textContent = "LED: Tắt";
+      }
+
+      // Chỉ báo Nam châm điện
+      const magDot = document.getElementById('hud-mag-dot');
+      const magLabel = document.getElementById('hud-mag-label');
+      if (st.magnet === 'boost') {
+        magDot.className = "w-2.5 h-2.5 rounded-full bg-purple-400 inline-block shadow-[0_0_8px_#a855f7]";
+        magLabel.textContent = "Nam châm: Hút";
+      } else if (st.magnet === 'drop') {
+        magDot.className = "w-2.5 h-2.5 rounded-full bg-amber-400 inline-block";
+        magLabel.textContent = "Nam châm: Thả";
+      } else {
+        magDot.className = "w-2.5 h-2.5 rounded-full bg-slate-600 inline-block";
+        magLabel.textContent = "Nam châm: Nghỉ";
+      }
+    }
+
+    function onWindowResize() {
+      const container = document.getElementById('canvas-container');
+      if (!container || !renderer) return;
+      camera.aspect = container.clientWidth / container.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(container.clientWidth, container.clientHeight);
+    }
+
+    /*************************************************************************
+     * PHẦN 7: VÒNG LẶP DỰNG HÌNH 3D (ANIMATION LOOP)
+     *************************************************************************/
+    function animate(now) {
+      requestAnimationFrame(animate);
+
+      if (isAnimatingStep && animFrom && animTo) {
+        const elapsed = now - animStartTime;
+        const t = Math.min(1, elapsed / animDuration);
+        const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+        const curX = THREE.MathUtils.lerp(animFrom.x, animTo.x, ease);
+        const curZ = THREE.MathUtils.lerp(animFrom.z, animTo.z, ease);
+        const curH = THREE.MathUtils.lerp(animFrom.heading, animTo.heading, ease);
+
+        robotGroup.position.set(curX, 0, curZ);
+        robotGroup.rotation.y = headingToRotationY(curH);
+
+        wheels.forEach(w => { w.rotation.x += 0.14 * simSpeed; });
+        updateDynamicDisksPositions(animTo.stepObj.items);
+
+        if (t >= 1) {
+          isAnimatingStep = false;
+          robotGroup.rotation.y = headingToRotationY(animTo.stepObj.heading);
+          updateDynamicDisksPositions(animTo.stepObj.items);
+
+          if (autoPlay) {
+            if (currentStepIndex < compiledSteps.length - 1) {
+              autoPlayTimer = setTimeout(() => {
+                if (autoPlay) stepForward();
+              }, 240 / simSpeed);
+            } else {
+              stopAutoPlay();
+            }
+          }
+        }
+      }
+
+      // Hiệu ứng phát sáng LED Bumper và vòng từ trường Nam châm trên Robot
+      const activeStep = compiledSteps[currentStepIndex];
+      if (activeStep && ledDomeMat) {
+        if (activeStep.led === 'red') {
+          ledDomeMat.color.setHex(0xef4444);
+          ledDomeMat.emissive.setHex(0xef4444);
+          ledDomeMat.emissiveIntensity = 0.85;
+        } else if (activeStep.led === 'green') {
+          ledDomeMat.color.setHex(0x10b981);
+          ledDomeMat.emissive.setHex(0x10b981);
+          ledDomeMat.emissiveIntensity = 0.85;
+        } else if (activeStep.led === 'blink') {
+          const isRed = Math.floor(now / 180) % 2 === 0;
+          const hex = isRed ? 0xef4444 : 0x10b981;
+          ledDomeMat.color.setHex(hex);
+          ledDomeMat.emissive.setHex(hex);
+          ledDomeMat.emissiveIntensity = 1.0;
+        } else {
+          ledDomeMat.color.setHex(0x94a3b8);
+          ledDomeMat.emissive.setHex(0x000000);
+          ledDomeMat.emissiveIntensity = 0;
+        }
+
+        if (activeStep.magnet === 'boost') {
+          magnetRingMesh.material.opacity = 0.45 + 0.35 * Math.sin(now * 0.01);
+          const s = 1 + 0.15 * Math.sin(now * 0.01);
+          magnetRingMesh.scale.set(s, s, 1);
+        } else {
+          magnetRingMesh.material.opacity = 0;
+        }
+      }
+
+      if (camMode === 'follow' && robotGroup) {
+        camTarget.lerp(new THREE.Vector3(robotGroup.position.x, 0.3, robotGroup.position.z), 0.1);
+      }
+
+      const sinPhi = Math.sin(spherical.phi);
+      const cosPhi = Math.cos(spherical.phi);
+      const sinTheta = Math.sin(spherical.theta);
+      const cosTheta = Math.cos(spherical.theta);
+
+      camera.position.x = camTarget.x + spherical.radius * sinPhi * sinTheta;
+      camera.position.y = camTarget.y + spherical.radius * cosPhi;
+      camera.position.z = camTarget.z + spherical.radius * sinPhi * cosTheta;
+      camera.lookAt(camTarget);
+
+      renderer.render(scene, camera);
+    }
+
+    window.onload = function () {
+      initThreeJS();
+      animate(performance.now());
+    };
+  </script>
+</body>
+</html>
